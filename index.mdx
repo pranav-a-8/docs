@@ -1,17 +1,18 @@
----
-title: "Streaming Speech-to-Text with WebSocket"
-description: "Stream audio in real-time and receive instant transcriptions with Waves ASR."
----
+# Streaming Speech-to-Text with WebSocket
+
+Stream audio in real-time and receive instant transcriptions with Waves ASR.
 
 ---
 
-## Quick Start
+## Overview
 
-The Waves Streaming STT API enables real-time speech-to-text transcription over WebSocket connections. Stream audio from microphones, files, or telephony systems and receive transcriptions as users speak.
+The Waves Streaming STT API enables real-time speech-to-text transcription over WebSocket connections. Stream audio from microphones, files, or telephony systems and receive transcriptions as users speak—perfect for voice assistants, live captioning, and conversational AI applications.
 
 **Endpoint:** `wss://waves-api.smallest.ai/api/v1/asr`
 
 **Method:** WebSocket Connection
+
+**Pricing:** $0.025 per minute (billed per second)
 
 ---
 
@@ -23,38 +24,48 @@ Include your API key as a query parameter in the WebSocket URL:
 wss://waves-api.smallest.ai/api/v1/asr?api_key=YOUR_API_KEY
 ```
 
----
-
-## Basic Request
-
-### Required Parameters
-
-| **Parameter**     | **Type** | **Description**                                      |
-| :---------------- | :------- | :--------------------------------------------------- |
-| `api_key`         | string   | Your Waves API key                                   |
-| `audioEncoding`   | string   | Audio format: `linear16`, `flac`, `mulaw`, or `opus` |
-| `audioSampleRate` | string   | Sample rate in Hz (e.g., `16000`)                    |
-| `audioChannels`   | string   | Number of audio channels (typically `1` for mono)    |
-
-### Optional Parameters
-
-- `audioLanguage` - Language code (default: `en`)
-- `addPunctuation` - Add punctuation to transcription (`true`/`false`)
-- `speechEndpointing` - Silence duration in ms to mark turn end (default: `300`)
+<Warning>
+Streaming STT requires an **Enterprise Monthly** or **Enterprise Yearly** subscription.
+</Warning>
 
 ---
 
-## Sample Code
+## Required Parameters
+
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| `api_key` | string | Your Waves API key | `sk_test_abc123...` |
+| `audioEncoding` | string | Audio format | `linear16`, `flac`, `mulaw`, `opus` |
+| `audioSampleRate` | string | Sample rate in Hz | `16000` (recommended) |
+| `audioChannels` | string | Number of audio channels | `1` (mono) |
+
+---
+
+## Optional Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `audioLanguage` | string | `en` | Language code (`en`, `hi`, `es`, `fr`, etc.) |
+| `addPunctuation` | boolean | `false` | Automatically add punctuation |
+| `speechEndpointing` | integer | `300` | Silence duration (ms) to mark turn end |
+
+<Tip>
+Use `16000` Hz sample rate for optimal balance between quality and performance. For telephony applications, `8000` Hz is standard.
+</Tip>
+
+---
+
+## Quick Start Example
 
 ### Python WebSocket Streaming
 
-```
+```python
 import asyncio
 import websockets
 import json
 
 async def transcribe_audio():
-    # Configure connection
+    # Configure connection parameters
     params = {
         "api_key": "YOUR_API_KEY",
         "audioEncoding": "linear16",
@@ -64,66 +75,72 @@ async def transcribe_audio():
         "addPunctuation": "true"
     }
     
+    # Build WebSocket URL
     query = "&".join([f"{k}={v}" for k, v in params.items()])
     url = f"wss://waves-api.smallest.ai/api/v1/asr?{query}"
     
+    # Connect to WebSocket
     async with websockets.connect(url) as ws:
-        # Open audio file
+        print("✅ Connected to Waves STT")
+        
+        # Read audio file
         with open("audio.wav", "rb") as f:
             audio_data = f.read()
         
-        # Stream in chunks (0.1 second chunks for 16kHz)
-        chunk_size = 16000 * 2 * 0.1  # bytes
+        # Stream audio in chunks (100ms chunks for 16kHz)
+        # Formula: sample_rate * bytes_per_sample * duration
+        chunk_size = int(16000 * 2 * 0.1)  # 3,200 bytes
         
-        for i in range(0, len(audio_data), int(chunk_size)):
-            chunk = audio_data[i:i+int(chunk_size)]
+        for i in range(0, len(audio_data), chunk_size):
+            chunk = audio_data[i:i + chunk_size]
             await ws.send(chunk)
             
-            # Check for responses
+            # Listen for responses (non-blocking)
             try:
-                response = await asyncio.wait_for(
-                    ws.recv(), 
-                    timeout=0.01
-                )
+                response = await asyncio.wait_for(ws.recv(), timeout=0.01)
                 result = json.loads(response)
+                
                 if "text" in result:
-                    print(f"Transcription: {result['text']}")
+                    end_marker = " [END]" if result.get("isEndOfTurn") else ""
+                    print(f"📝 {result['text']}{end_marker}")
+                    
             except asyncio.TimeoutError:
-                pass
+                continue
         
         # Signal end of stream
         await ws.send(b'')
+        print("✅ Streaming complete")
         
-        # Get final results
+        # Collect remaining responses
         async for message in ws:
             result = json.loads(message)
             if "text" in result:
-                print(f"Final: {result['text']}")
+                print(f"📝 Final: {result['text']}")
 
+# Run the transcription
 asyncio.run(transcribe_audio())
 ```
 
 ---
 
-## Sample Response
+## Response Format
 
-Responses are JSON objects containing transcription results:
+### Transcription Response
 
-```
+```json
 {
   "text": "Hello, this is a test transcription.",
   "isEndOfTurn": false
 }
 ```
 
-### Response Fields
-
-- `text` - The transcribed text segment
-- `isEndOfTurn` - Boolean indicating if speech turn is complete (appears when silence threshold is reached)
+**Response Fields:**
+- `text` (string) - The transcribed text segment
+- `isEndOfTurn` (boolean) - `true` when silence threshold is reached, indicating the speaker has finished
 
 ### Error Response
 
-```
+```json
 {
   "error": "Invalid audio format",
   "code": "AUDIO_FORMAT_ERROR"
@@ -132,20 +149,94 @@ Responses are JSON objects containing transcription results:
 
 ---
 
-## Key Implementation Tips
+## Best Practices
 
-**Chunking Strategy:** Stream audio in small chunks (100-300ms) for optimal latency. For 16kHz audio, this is 3,200-9,600 bytes per chunk.
+### 1. Optimal Chunking Strategy
 
-**End-of-Stream Signal:** Always send an empty binary message `b''` when audio stream completes to flush remaining audio from the buffer.
+Stream audio in **100-300ms chunks** for best latency:
 
-**Sample Rate Matching:** Ensure your audio sample rate matches the `audioSampleRate` parameter to avoid transcription errors.
+- **16 kHz audio:** 3,200 - 9,600 bytes per chunk
+- **8 kHz audio:** 1,600 - 4,800 bytes per chunk
+- **Formula:** `sample_rate × 2 × duration_in_seconds`
 
-**Supported Languages:** Waves STT supports 30+ languages including English (`en`), Hindi (`hi`), Spanish (`es`), and more. See full list in the [API documentation](https://waves-docs.smallest.ai/v4.0.0/content/introduction/introduction).
+### 2. End-of-Stream Signal
+
+Always send an empty binary message when finished:
+
+```python
+await ws.send(b'')  # Flushes remaining audio from buffer
+```
+
+### 3. Sample Rate Matching
+
+Ensure your audio's actual sample rate matches the `audioSampleRate` parameter. Mismatched rates cause poor transcription quality.
+
+### 4. Error Handling
+
+Implement proper error handling for network issues:
+
+```python
+try:
+    async with websockets.connect(url) as ws:
+        # Your streaming code
+except websockets.exceptions.ConnectionClosed:
+    print("Connection closed unexpectedly")
+except Exception as e:
+    print(f"Error: {e}")
+```
 
 ---
 
-## Subscription Requirements
+## Supported Languages
 
-Streaming STT requires an **Enterprise Monthly** or **Enterprise Yearly** subscription.
+Waves STT supports **30+ languages** including:
 
-**Pricing:** \$0.025 per minute of audio processed (billed per second).
+| Language | Code | Language | Code |
+|----------|------|----------|------|
+| English | `en` | Hindi | `hi` |
+| Spanish | `es` | French | `fr` |
+| German | `de` | Russian | `ru` |
+| Portuguese | `pt` | Japanese | `ja` |
+| Italian | `it` | Dutch | `nl` |
+
+<Info>
+For the complete language list and availability, see the [full API documentation](https://waves-docs.smallest.ai).
+</Info>
+
+---
+
+## Audio Format Support
+
+| Format | Description | Best For |
+|--------|-------------|----------|
+| `linear16` | 16-bit linear PCM (recommended) | High quality, general use |
+| `flac` | FLAC compressed | Compressed audio files |
+| `mulaw` | μ-law encoded | Telephony applications |
+| `opus` | Opus compressed | Browser-native formats |
+
+---
+
+## Common Issues
+
+**Problem:** Poor transcription accuracy
+
+**Solutions:**
+- Verify sample rate matches audio file
+- Use `linear16` encoding for best quality
+- Ensure mono audio (`audioChannels: "1"`)
+- Enable punctuation for better readability
+
+**Problem:** High latency
+
+**Solutions:**
+- Reduce chunk size to 100ms
+- Use lower sample rate (8kHz for telephony)
+- Check network connection quality
+
+---
+
+## Need Help?
+
+- **Documentation:** [https://waves-docs.smallest.ai](https://waves-docs.smallest.ai)
+- **API Status:** Check service status and uptime
+- **Support:** Contact support for Enterprise customers
