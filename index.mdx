@@ -1,97 +1,151 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Streaming Speech-to-Text with WebSocket"
+description: "Stream audio in real-time and receive instant transcriptions with Waves ASR."
 ---
 
-## Setting up
+---
 
-Get your documentation site up and running in minutes.
+## Quick Start
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+The Waves Streaming STT API enables real-time speech-to-text transcription over WebSocket connections. Stream audio from microphones, files, or telephony systems and receive transcriptions as users speak.
 
-## Make it yours
+**Endpoint:** `wss://waves-api.smallest.ai/api/v1/asr`
 
-Design a docs site that looks great and empowers your users.
+**Method:** WebSocket Connection
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+---
 
-## Create beautiful pages
+## Authentication
 
-Everything you need to create world-class documentation.
+Include your API key as a query parameter in the WebSocket URL:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+```
+wss://waves-api.smallest.ai/api/v1/asr?api_key=YOUR_API_KEY
+```
 
-## Need inspiration?
+---
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+## Basic Request
+
+### Required Parameters
+
+| **Parameter**     | **Type** | **Description**                                      |
+| :---------------- | :------- | :--------------------------------------------------- |
+| `api_key`         | string   | Your Waves API key                                   |
+| `audioEncoding`   | string   | Audio format: `linear16`, `flac`, `mulaw`, or `opus` |
+| `audioSampleRate` | string   | Sample rate in Hz (e.g., `16000`)                    |
+| `audioChannels`   | string   | Number of audio channels (typically `1` for mono)    |
+
+### Optional Parameters
+
+- `audioLanguage` - Language code (default: `en`)
+- `addPunctuation` - Add punctuation to transcription (`true`/`false`)
+- `speechEndpointing` - Silence duration in ms to mark turn end (default: `300`)
+
+---
+
+## Sample Code
+
+### Python WebSocket Streaming
+
+```
+import asyncio
+import websockets
+import json
+
+async def transcribe_audio():
+    # Configure connection
+    params = {
+        "api_key": "YOUR_API_KEY",
+        "audioEncoding": "linear16",
+        "audioSampleRate": "16000",
+        "audioChannels": "1",
+        "audioLanguage": "en",
+        "addPunctuation": "true"
+    }
+    
+    query = "&".join([f"{k}={v}" for k, v in params.items()])
+    url = f"wss://waves-api.smallest.ai/api/v1/asr?{query}"
+    
+    async with websockets.connect(url) as ws:
+        # Open audio file
+        with open("audio.wav", "rb") as f:
+            audio_data = f.read()
+        
+        # Stream in chunks (0.1 second chunks for 16kHz)
+        chunk_size = 16000 * 2 * 0.1  # bytes
+        
+        for i in range(0, len(audio_data), int(chunk_size)):
+            chunk = audio_data[i:i+int(chunk_size)]
+            await ws.send(chunk)
+            
+            # Check for responses
+            try:
+                response = await asyncio.wait_for(
+                    ws.recv(), 
+                    timeout=0.01
+                )
+                result = json.loads(response)
+                if "text" in result:
+                    print(f"Transcription: {result['text']}")
+            except asyncio.TimeoutError:
+                pass
+        
+        # Signal end of stream
+        await ws.send(b'')
+        
+        # Get final results
+        async for message in ws:
+            result = json.loads(message)
+            if "text" in result:
+                print(f"Final: {result['text']}")
+
+asyncio.run(transcribe_audio())
+```
+
+---
+
+## Sample Response
+
+Responses are JSON objects containing transcription results:
+
+```
+{
+  "text": "Hello, this is a test transcription.",
+  "isEndOfTurn": false
+}
+```
+
+### Response Fields
+
+- `text` - The transcribed text segment
+- `isEndOfTurn` - Boolean indicating if speech turn is complete (appears when silence threshold is reached)
+
+### Error Response
+
+```
+{
+  "error": "Invalid audio format",
+  "code": "AUDIO_FORMAT_ERROR"
+}
+```
+
+---
+
+## Key Implementation Tips
+
+**Chunking Strategy:** Stream audio in small chunks (100-300ms) for optimal latency. For 16kHz audio, this is 3,200-9,600 bytes per chunk.
+
+**End-of-Stream Signal:** Always send an empty binary message `b''` when audio stream completes to flush remaining audio from the buffer.
+
+**Sample Rate Matching:** Ensure your audio sample rate matches the `audioSampleRate` parameter to avoid transcription errors.
+
+**Supported Languages:** Waves STT supports 30+ languages including English (`en`), Hindi (`hi`), Spanish (`es`), and more. See full list in the [API documentation](https://waves-docs.smallest.ai/v4.0.0/content/introduction/introduction).
+
+---
+
+## Subscription Requirements
+
+Streaming STT requires an **Enterprise Monthly** or **Enterprise Yearly** subscription.
+
+**Pricing:** \$0.025 per minute of audio processed (billed per second).
